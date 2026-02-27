@@ -1,0 +1,10 @@
+# Python 构建产物
+*.egg-info/
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+.venv/
+venv/
+.env

@@ -1,0 +1,2 @@
+[console_scripts]
+exceltui = exceltui.main:main

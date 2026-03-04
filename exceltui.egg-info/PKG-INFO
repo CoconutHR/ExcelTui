@@ -1,0 +1,51 @@
+Metadata-Version: 2.4
+Name: exceltui
+Version: 1.0.0
+Summary: Excel通用数据提取工具 - 支持JSON/键值对/纯文本格式
+Home-page: https://github.com/CoconutHR/exceltui
+Author: coco
+Author-email: excel.tui@coco
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Requires-Dist: pandas>=1.3.0
+Requires-Dist: openpyxl>=3.0.0
+Requires-Dist: rich>=10.0.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# Excel Tui
+
+Excel通用数据提取工具,支持JSON、键值对、纯文本格式的数据提取和处理。
+
+## 安装
+```bash
+pip install -e .
+```
+
+## 使用
+
+在任意目录下运行:
+```bash
+exceltui
+```
+
+工具会自动扫描当前目录下的Excel文件。
+
+## 功能特性
+
+- 支持JSON格式数据提取
+- 支持键值对格式 {key:value}
+- 支持纯文本处理
+- 多列交互式处理
+- 转义字符处理
+- 自定义输出格式

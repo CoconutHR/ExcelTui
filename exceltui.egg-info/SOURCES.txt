@@ -1,0 +1,10 @@
+README.md
+setup.py
+exceltui/__init__.py
+exceltui/main.py
+exceltui.egg-info/PKG-INFO
+exceltui.egg-info/SOURCES.txt
+exceltui.egg-info/dependency_links.txt
+exceltui.egg-info/entry_points.txt
+exceltui.egg-info/requires.txt
+exceltui.egg-info/top_level.txt

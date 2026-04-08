@@ -5,10 +5,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="exceltui",
-    version="1.0.0",
+    version="2.0.0",
     author="coco",
     author_email="excel.tui@coco",
-    description="Excel通用数据提取工具 - 支持JSON/键值对/纯文本格式",
+    description="Excel通用数据处理工具 - 支持JSON/键值对/纯文本格式、去重、筛选交集",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/CoconutHR/exceltui",

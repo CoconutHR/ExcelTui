@@ -8,3 +8,8 @@ build/
 .venv/
 venv/
 .env
+
+# 测试数据文件
+exceltui/*.xlsx
+exceltui/*.jsonl
+exceltui/*.txt

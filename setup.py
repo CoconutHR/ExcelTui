@@ -5,10 +5,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="exceltui",
-    version="2.0.0",
+    version="5.0.0",
     author="coco",
     author_email="excel.tui@coco",
-    description="Excel通用数据处理工具 - 支持JSON/键值对/纯文本格式、去重、筛选交集",
+    description="Excel通用数据处理工具 - 数据提取/去重/筛选/合并/分割/JSONL转换",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/CoconutHR/exceltui",
@@ -20,7 +20,6 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=[
-        "pandas>=1.3.0",
         "openpyxl>=3.0.0",
         "rich>=10.0.0",
     ],

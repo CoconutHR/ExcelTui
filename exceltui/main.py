@@ -9,6 +9,8 @@ from rich.table import Table
 from rich import box
 import os
 import sys
+import shutil
+import datetime
 from pathlib import Path
 from copy import deepcopy
 import openpyxl
@@ -53,7 +55,7 @@ def detect_format(text):
     try:
         json.loads(text)
         return DataFormat.JSON
-    except:
+    except (json.JSONDecodeError, ValueError, TypeError):
         pass
     
     # 检测是否为键值对格式 {key:value}
@@ -69,7 +71,7 @@ def extract_keys_from_json(text):
         data = json.loads(str(text))
         if isinstance(data, dict):
             return list(data.keys())
-    except:
+    except (json.JSONDecodeError, ValueError, TypeError):
         pass
     return []
 
@@ -154,7 +156,7 @@ def extract_value_from_json(text, key):
         data = json.loads(str(text))
         if isinstance(data, dict) and key in data:
             return data[key]
-    except:
+    except (json.JSONDecodeError, ValueError, TypeError):
         pass
     return ""
 
@@ -222,7 +224,7 @@ def remove_key_from_json(text, key):
         if isinstance(data, dict) and key in data:
             del data[key]
             return json.dumps(data, ensure_ascii=False)
-    except:
+    except (json.JSONDecodeError, ValueError, TypeError):
         pass
     return text
 
@@ -679,7 +681,8 @@ def process_excel_interactive(file_path):
                         continue
                     return False, "未进行修改", 0
                 
-                output_file = file_path.replace(".xlsx", "_处理后.xlsx")
+                base, _ext = os.path.splitext(file_path)
+                output_file = base + "_处理后.xlsx"
                 
                 if os.path.exists(output_file):
                     if not Confirm.ask(f"文件 {output_file} 已存在,是否覆盖?", default=True):
@@ -793,9 +796,8 @@ def display_file_list_tui(xlsx_files, script_dir, title="📂 当前文件夹中
     """以表格形式展示 xlsx 文件列表，优化长文件名显示"""
     # 获取终端宽度，默认80
     try:
-        import shutil
         terminal_width = shutil.get_terminal_size().columns
-    except:
+    except (ValueError, OSError):
         terminal_width = 80
     
     # 计算文件名列的宽度（留出编号和大小的空间）
@@ -842,10 +844,14 @@ def display_file_list_tui(xlsx_files, script_dir, title="📂 当前文件夹中
         console.print(f"\n[dim]💡 提示: 共有 {long_files_count} 个文件名超过显示宽度，已自动优化显示[/dim]")
 
 
-def select_file_tui(xlsx_files, prompt_text="请输入要处理的文件编号"):
-    """通用文件选择，返回 0-based 索引"""
+def select_file_tui(xlsx_files, prompt_text="请输入要处理的文件编号（输入 q 返回）"):
+    """通用文件选择，返回 0-based 索引；用户输入 q 时返回 None"""
     while True:
         user_input = Prompt.ask(f"\n[bold green]{prompt_text}[/bold green]").strip()
+
+        if user_input.lower() == "q":
+            console.print("[dim]已返回上级菜单。[/dim]")
+            return None
 
         if not user_input.isdigit():
             console.print("[bold red]❌ 请输入有效的数字编号！[/bold red]")
@@ -861,8 +867,8 @@ def select_file_tui(xlsx_files, prompt_text="请输入要处理的文件编号")
         return idx - 1
 
 
-def select_column_interactively(ws, prompt_title="请输入列号（如 A、B、P、AA 等）"):
-    """展示工作表列预览，提示用户输入列字母，返回 (col_letter, col_index_0based)"""
+def select_column_interactively(ws, prompt_title="请输入列号（如 A、B、P、AA 等），输入 q 返回"):
+    """展示工作表列预览，提示用户输入列字母，返回 (col_letter, col_index_0based)；用户输入 q 时返回 None"""
     max_col = ws.max_column
 
     # 读取表头行
@@ -886,6 +892,10 @@ def select_column_interactively(ws, prompt_title="请输入列号（如 A、B、
 
     while True:
         user_input = Prompt.ask(f"\n[bold green]{prompt_title}[/bold green]").strip()
+
+        if user_input.lower() == "q":
+            console.print("[dim]已返回上级菜单。[/dim]")
+            return None
 
         if not user_input:
             console.print("[bold red]❌ 输入不能为空，请重新输入！[/bold red]")
@@ -919,8 +929,8 @@ def select_column_interactively(ws, prompt_title="请输入列号（如 A、B、
         return user_input, col_index
 
 
-def select_column_from_df(df, prompt_title="请输入列号（如 A、B、P、AA 等）"):
-    """从DataFrame展示列预览，提示用户输入列字母，返回 (col_letter, col_index_0based)"""
+def select_column_from_df(df, prompt_title="请输入列号（如 A、B、P、AA 等），输入 q 返回"):
+    """从DataFrame展示列预览，提示用户输入列字母，返回 (col_letter, col_index_0based)；用户输入 q 时返回 None"""
     total_cols = len(df.columns)
 
     # 展示列预览（最多 52 列）
@@ -938,6 +948,10 @@ def select_column_from_df(df, prompt_title="请输入列号（如 A、B、P、AA
 
     while True:
         user_input = Prompt.ask(f"\n[bold green]{prompt_title}[/bold green]").strip()
+
+        if user_input.lower() == "q":
+            console.print("[dim]已返回上级菜单。[/dim]")
+            return None
 
         if not user_input:
             console.print("[bold red]❌ 输入不能为空，请重新输入！[/bold red]")
@@ -977,102 +991,117 @@ def select_column_from_df(df, prompt_title="请输入列号（如 A、B、P、AA
 
 def deduplicate_by_column():
     """根据指定列去重，保留首次出现的行"""
-    console.print(Panel.fit(
-        "[bold cyan]🔁 Excel 去重处理工具[/bold cyan]\n[dim]根据指定列去重，保留首次出现的行[/dim]",
-        border_style="cyan",
-        padding=(1, 4)
-    ))
-    console.print()  # 空行美化
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]🔁 Excel 去重处理工具[/bold cyan]\n[dim]根据指定列去重，保留首次出现的行[/dim]",
+            border_style="cyan",
+            padding=(1, 4)
+        ))
+        console.print()  # 空行美化
 
-    xlsx_files, script_dir = get_xlsx_files()
+        xlsx_files, script_dir = get_xlsx_files()
 
-    if not xlsx_files:
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n请将需要处理的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red"
+            ))
+            return False
+
+        # 显示文件列表
+        display_file_list_tui(xlsx_files, script_dir)
+
+        # 用户选择文件
+        file_idx = select_file_tui(xlsx_files)
+        if file_idx is None:
+            return False
+        selected_file = get_safe_filename(xlsx_files[file_idx])
+        filepath = os.path.join(script_dir, selected_file)
+
+        console.print(f"\n[bold green]✅ 已选择文件：[bold white]{selected_file}[/bold white][/bold green]")
+
+        # 读取文件以获取列信息
+        with console.status("[bold cyan]正在读取文件列信息...[/bold cyan]", spinner="dots"):
+            df_preview = pd.read_excel(filepath, dtype=str, nrows=0)  # 只读表头
+
+        # 用户选择列
+        result = select_column_from_df(df_preview)
+        if result is None:
+            return False
+        col_letter, col_index = result
+
+        # 确认操作
+        console.print()
         console.print(Panel(
-            "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n请将需要处理的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 处理文件：[cyan]{selected_file}[/cyan]\n"
+            f"  🔑 去重列：  [cyan]{col_letter} 列[/cyan]（{df_preview.columns[col_index]}）\n"
+            f"  📁 输出目录：[cyan]{script_dir}[/cyan]",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]"
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始处理？[/bold yellow]",
+            choices=["y", "n"],
+            default="y"
+        )
+
+        if confirm.lower() != 'y':
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # 执行处理
+        console.print()
+        with console.status(f"[bold cyan]正在读取文件...[/bold cyan]", spinner="dots"):
+            df = pd.read_excel(filepath, dtype=str)
+
+        original_count = len(df)
+        console.print(f"[green]✅ 文件读取完成，共 [bold]{original_count}[/bold] 行数据[/green]")
+
+        with console.status(f"[bold cyan]正在根据 {col_letter} 列去重...[/bold cyan]", spinner="dots"):
+            df_dedup = df.drop_duplicates(subset=df.columns[col_index], keep='first')
+            df_dedup = df_dedup.reset_index(drop=True)
+
+        dedup_count = len(df_dedup)
+        removed_count = original_count - dedup_count
+
+        # 生成输出文件名
+        base_name = os.path.splitext(selected_file)[0]
+        output_filename = f"{base_name}_去重_{col_letter}列.xlsx"
+        output_path = os.path.join(script_dir, output_filename)
+
+        with console.status(f"[bold cyan]正在保存文件...[/bold cyan]", spinner="dots"):
+            # 清理控制字符
+            df_to_save = df_dedup.apply(lambda col: col.map(sanitize_excel_cell_value))
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df_to_save.to_excel(writer, index=False, sheet_name='Sheet1')
+                worksheet = writer.sheets['Sheet1']
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.number_format = '@'
+
+        # 显示结果
+        result_table = Table(title="✅ 处理完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("项目", style="bold")
+        result_table.add_column("数值", style="cyan", justify="right")
+
+        result_table.add_row("原始行数", str(original_count))
+        result_table.add_row("去重后行数", str(dedup_count))
+        result_table.add_row("删除重复行数", f"[red]{removed_count}[/red]")
+        result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
             border_style="red"
         ))
         return False
-
-    # 显示文件列表
-    display_file_list_tui(xlsx_files, script_dir)
-
-    # 用户选择文件
-    file_idx = select_file_tui(xlsx_files)
-    selected_file = get_safe_filename(xlsx_files[file_idx])
-    filepath = os.path.join(script_dir, selected_file)
-
-    console.print(f"\n[bold green]✅ 已选择文件：[bold white]{selected_file}[/bold white][/bold green]")
-
-    # 读取文件以获取列信息
-    with console.status("[bold cyan]正在读取文件列信息...[/bold cyan]", spinner="dots"):
-        df_preview = pd.read_excel(filepath, dtype=str, nrows=0)  # 只读表头
-
-    # 用户选择列
-    col_letter, col_index = select_column_from_df(df_preview)
-
-    # 确认操作
-    console.print()
-    console.print(Panel(
-        f"[bold]操作确认[/bold]\n\n"
-        f"  📄 处理文件：[cyan]{selected_file}[/cyan]\n"
-        f"  🔑 去重列：  [cyan]{col_letter} 列[/cyan]（{df_preview.columns[col_index]}）\n"
-        f"  📁 输出目录：[cyan]{script_dir}[/cyan]",
-        border_style="yellow",
-        title="[yellow]请确认[/yellow]"
-    ))
-
-    confirm = Prompt.ask(
-        "[bold yellow]确认开始处理？[/bold yellow]",
-        choices=["y", "n"],
-        default="y"
-    )
-
-    if confirm.lower() != 'y':
-        console.print("[dim]已取消操作。[/dim]")
-        return False
-
-    # 执行处理
-    console.print()
-    with console.status(f"[bold cyan]正在读取文件...[/bold cyan]", spinner="dots"):
-        df = pd.read_excel(filepath, dtype=str)
-
-    original_count = len(df)
-    console.print(f"[green]✅ 文件读取完成，共 [bold]{original_count}[/bold] 行数据[/green]")
-
-    with console.status(f"[bold cyan]正在根据 {col_letter} 列去重...[/bold cyan]", spinner="dots"):
-        df_dedup = df.drop_duplicates(subset=df.columns[col_index], keep='first')
-        df_dedup = df_dedup.reset_index(drop=True)
-
-    dedup_count = len(df_dedup)
-    removed_count = original_count - dedup_count
-
-    # 生成输出文件名
-    base_name = os.path.splitext(selected_file)[0]
-    output_filename = f"{base_name}_去重_{col_letter}列.xlsx"
-    output_path = os.path.join(script_dir, output_filename)
-
-    with console.status(f"[bold cyan]正在保存文件...[/bold cyan]", spinner="dots"):
-        # 清理控制字符
-        df_to_save = df_dedup.apply(lambda col: col.map(sanitize_excel_cell_value))
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            df_to_save.to_excel(writer, index=False, sheet_name='Sheet1')
-            worksheet = writer.sheets['Sheet1']
-            for row in worksheet.iter_rows():
-                for cell in row:
-                    cell.number_format = '@'
-
-    # 显示结果
-    result_table = Table(title="✅ 处理完成", show_header=True, header_style="bold green", box=box.ROUNDED)
-    result_table.add_column("项目", style="bold")
-    result_table.add_column("数值", style="cyan", justify="right")
-
-    result_table.add_row("原始行数", str(original_count))
-    result_table.add_row("去重后行数", str(dedup_count))
-    result_table.add_row("删除重复行数", f"[red]{removed_count}[/red]")
-    result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
-
-    console.print(result_table)
-    return True
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -1210,125 +1239,862 @@ def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
 
 def filter_intersection():
     """从数据文件中筛选匹配行，输出顺序与筛选文件保持一致"""
-    console.print(Panel.fit(
-        "[bold cyan]🔗 Excel 行筛选工具[/bold cyan]\n"
-        "[dim]从数据文件中筛选匹配行，输出顺序与筛选文件保持一致[/dim]",
-        border_style="cyan",
-        padding=(1, 4),
-    ))
-    console.print()  # 空行美化
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]🔗 Excel 行筛选工具[/bold cyan]\n"
+            "[dim]从数据文件中筛选匹配行，输出顺序与筛选文件保持一致[/dim]",
+            border_style="cyan",
+            padding=(1, 4),
+        ))
+        console.print()  # 空行美化
 
-    xlsx_files, script_dir = get_xlsx_files()
+        xlsx_files, script_dir = get_xlsx_files()
 
-    if not xlsx_files:
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
+                "请将需要处理的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red",
+            ))
+            return False
+
+        # ── 选择数据文件（A 文件）──
+        console.rule("[bold cyan]第一步：选择数据文件（被筛选的文件）[/bold cyan]")
+        display_file_list_tui(xlsx_files, script_dir)
+        file_a_idx = select_file_tui(xlsx_files, prompt_text="请输入数据文件的编号（输入 q 返回）")
+        if file_a_idx is None:
+            return False
+        file_a_name = get_safe_filename(xlsx_files[file_a_idx])
+        file_a_path = os.path.join(script_dir, file_a_name)
+        console.print(f"[green]✅ 已选择数据文件：[bold white]{file_a_name}[/bold white][/green]")
+
+        # ── 选择筛选文件（B 文件）──
+        console.print()
+        console.rule("[bold cyan]第二步：选择筛选文件（提供匹配值的文件）[/bold cyan]")
+        display_file_list_tui(xlsx_files, script_dir)
+        file_b_idx = select_file_tui(xlsx_files, prompt_text="请输入筛选文件的编号（输入 q 返回）")
+        if file_b_idx is None:
+            return False
+        file_b_name = get_safe_filename(xlsx_files[file_b_idx])
+        file_b_path = os.path.join(script_dir, file_b_name)
+        console.print(f"[green]✅ 已选择筛选文件：[bold white]{file_b_name}[/bold white][/green]")
+
+        # ── 选择数据文件的匹配列 ──
+        console.print()
+        console.rule("[bold cyan]第三步：选择数据文件中用于匹配的列[/bold cyan]")
+        with console.status("[cyan]正在读取数据文件列信息...[/cyan]", spinner="dots"):
+            wb_a_tmp = openpyxl.load_workbook(file_a_path, read_only=True, data_only=True)
+            ws_a_tmp = wb_a_tmp.active
+
+        result_a = select_column_interactively(
+            ws_a_tmp,
+            prompt_title="请输入数据文件中用于匹配的列号（如 A、B、P、AA 等），输入 q 返回",
+        )
+        wb_a_tmp.close()
+        if result_a is None:
+            return False
+        col_a_letter, col_a_index = result_a
+        console.print(f"[green]✅ 已选择数据文件匹配列：[bold white]{col_a_letter} 列[/bold white][/green]")
+
+        # ── 选择筛选文件的匹配列 ──
+        console.print()
+        console.rule("[bold cyan]第四步：选择筛选文件中提供匹配值的列[/bold cyan]")
+        with console.status("[cyan]正在读取筛选文件列信息...[/cyan]", spinner="dots"):
+            wb_b_tmp = openpyxl.load_workbook(file_b_path, read_only=True, data_only=True)
+            ws_b_tmp = wb_b_tmp.active
+
+        result_b = select_column_interactively(
+            ws_b_tmp,
+            prompt_title="请输入筛选文件中提供匹配值的列号（如 A、B、P、AA 等），输入 q 返回",
+        )
+        wb_b_tmp.close()
+        if result_b is None:
+            return False
+        col_b_letter, col_b_index = result_b
+        console.print(f"[green]✅ 已选择筛选文件匹配列：[bold white]{col_b_letter} 列[/bold white][/green]")
+
+        # ── 生成输出文件名 ──
+        base_name = os.path.splitext(file_a_name)[0]
+        output_filename = f"{base_name}_筛选结果.xlsx"
+        output_path = os.path.join(script_dir, output_filename)
+
+        # ── 确认操作 ──
+        console.print()
         console.print(Panel(
-            "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
-            "请将需要处理的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 数据文件：  [cyan]{file_a_name}[/cyan]（匹配列：{col_a_letter} 列）\n"
+            f"  🔑 筛选文件：  [cyan]{file_b_name}[/cyan]（取值列：{col_b_letter} 列）\n"
+            f"  🔀 输出顺序：  与筛选文件 {col_b_letter} 列顺序一致\n"
+            f"  💾 输出文件：  [cyan]{output_filename}[/cyan]\n"
+            f"  📁 输出目录：  [cyan]{script_dir}[/cyan]",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]",
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始处理？[/bold yellow]",
+            choices=["y", "n"],
+            default="y",
+        )
+        if confirm.lower() != "y":
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # ── 执行处理 ──
+        console.print()
+        console.rule("[bold cyan]处理中[/bold cyan]")
+
+        b_order, b_values = read_b_column(file_b_path, col_b_index)
+        console.print(
+            f"[green]✅ 筛选文件 {col_b_letter} 列共读取到 "
+            f"[bold]{len(b_order)}[/bold] 个值（[bold]{len(b_values)}[/bold] 个唯一值）[/green]"
+        )
+
+        original_rows, matched_rows = filter_and_write(
+            file_a_path, col_a_index, b_order, b_values, output_path
+        )
+
+        # ── 展示结果 ──
+        console.print()
+        result_table = Table(title="✅ 处理完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("项目", style="bold")
+        result_table.add_column("数值", style="cyan", justify="right")
+
+        result_table.add_row("数据文件总行数（不含表头）", str(original_rows))
+        result_table.add_row("筛选文件唯一值数量", str(len(b_values)))
+        result_table.add_row("命中并保留的行数", f"[green]{matched_rows}[/green]")
+        result_table.add_row("未命中丢弃的行数", f"[red]{original_rows - matched_rows}[/red]")
+        result_table.add_row("输出顺序", f"与筛选文件 {col_b_letter} 列一致")
+        result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
+            border_style="red"
+        ))
+        return False
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# 功能3：合并当前文件夹下所有 Excel 文件
+# ────────────────────────────────────────────────────────────────────────────────
+
+def merge_all_xlsx():
+    """将当前文件夹下所有 xlsx 文件纵向合并为一个文件（表头相同）"""
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]📑 Excel 批量合并工具[/bold cyan]\n"
+            "[dim]将当前文件夹下所有 Excel 文件按名称合并为一个文件[/dim]",
+            border_style="cyan",
+            padding=(1, 4),
+        ))
+        console.print()
+
+        xlsx_files, script_dir = get_xlsx_files()
+
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
+                "请将需要合并的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red",
+            ))
+            return False
+
+        if len(xlsx_files) < 2:
+            console.print(Panel(
+                "[bold yellow]⚠️ 当前文件夹中只有 1 个 .xlsx 文件，无需合并。[/bold yellow]",
+                border_style="yellow",
+            ))
+            return False
+
+        # 显示将要合并的文件列表
+        display_file_list_tui(xlsx_files, script_dir, title="📂 将要合并的 Excel 文件")
+
+        # 让用户指定输出文件名
+        console.print()
+        default_output = "合并结果.xlsx"
+        output_filename = Prompt.ask(
+            "[bold green]请输入输出文件名[/bold green]",
+            default=default_output,
+        ).strip()
+        if not output_filename.endswith(".xlsx"):
+            output_filename += ".xlsx"
+        output_path = os.path.join(script_dir, output_filename)
+
+        # 确认操作
+        console.print()
+        console.print(Panel(
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 合并文件数：[cyan]{len(xlsx_files)}[/cyan] 个\n"
+            f"  💾 输出文件：  [cyan]{output_filename}[/cyan]\n"
+            f"  📁 输出目录：  [cyan]{script_dir}[/cyan]",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]",
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始合并？[/bold yellow]",
+            choices=["y", "n"],
+            default="y",
+        )
+        if confirm.lower() != "y":
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # 执行合并
+        console.print()
+        console.rule("[bold cyan]处理中[/bold cyan]")
+
+        df_list = []
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]正在读取文件...", total=len(xlsx_files))
+
+            for file_path in xlsx_files:
+                fname = get_safe_filename(file_path)
+                # 跳过输出文件本身
+                if fname == output_filename:
+                    progress.advance(task)
+                    continue
+                try:
+                    df = pd.read_excel(file_path, dtype=str, engine="openpyxl")
+                    df_list.append(df)
+                    progress.update(task, description=f"[cyan]已读取：{fname}（{len(df)} 行）")
+                except Exception as e:
+                    console.print(f"[red]❌ 读取失败：{fname}，错误：{e}[/red]")
+                progress.advance(task)
+
+        if not df_list:
+            console.print("[red]没有成功读取任何文件，合并终止。[/red]")
+            return False
+
+        with console.status("[bold cyan]正在合并数据...[/bold cyan]", spinner="dots"):
+            merged_df = pd.concat(df_list, ignore_index=True)
+
+        with console.status("[bold cyan]正在保存文件...[/bold cyan]", spinner="dots"):
+            df_to_save = merged_df.apply(lambda col: col.map(sanitize_excel_cell_value))
+            with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                df_to_save.to_excel(writer, index=False, sheet_name="Sheet1")
+                worksheet = writer.sheets["Sheet1"]
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.number_format = "@"
+
+        # 展示结果
+        console.print()
+        result_table = Table(title="✅ 合并完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("项目", style="bold")
+        result_table.add_column("数值", style="cyan", justify="right")
+        result_table.add_row("合并文件数", str(len(df_list)))
+        result_table.add_row("总行数（不含表头）", str(len(merged_df)))
+        result_table.add_row("总列数", str(len(merged_df.columns)))
+        result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
             border_style="red",
         ))
         return False
 
-    # ── 选择数据文件（A 文件）──
-    console.rule("[bold cyan]第一步：选择数据文件（被筛选的文件）[/bold cyan]")
-    display_file_list_tui(xlsx_files, script_dir)
-    file_a_idx = select_file_tui(xlsx_files, prompt_text="请输入数据文件的编号")
-    file_a_name = get_safe_filename(xlsx_files[file_a_idx])
-    file_a_path = os.path.join(script_dir, file_a_name)
-    console.print(f"[green]✅ 已选择数据文件：[bold white]{file_a_name}[/bold white][/green]")
 
-    # ── 选择筛选文件（B 文件）──
-    console.print()
-    console.rule("[bold cyan]第二步：选择筛选文件（提供匹配值的文件）[/bold cyan]")
-    display_file_list_tui(xlsx_files, script_dir)
-    file_b_idx = select_file_tui(xlsx_files, prompt_text="请输入筛选文件的编号")
-    file_b_name = get_safe_filename(xlsx_files[file_b_idx])
-    file_b_path = os.path.join(script_dir, file_b_name)
-    console.print(f"[green]✅ 已选择筛选文件：[bold white]{file_b_name}[/bold white][/green]")
+# ────────────────────────────────────────────────────────────────────────────────
+# 功能4：按指定行数分割 Excel 文件
+# ────────────────────────────────────────────────────────────────────────────────
 
-    # ── 选择数据文件的匹配列 ──
-    console.print()
-    console.rule("[bold cyan]第三步：选择数据文件中用于匹配的列[/bold cyan]")
-    with console.status("[cyan]正在读取数据文件列信息...[/cyan]", spinner="dots"):
-        wb_a_tmp = openpyxl.load_workbook(file_a_path, read_only=True, data_only=True)
-        ws_a_tmp = wb_a_tmp.active
+def split_xlsx_by_rows():
+    """将一个 Excel 文件按指定行数分割为多个子文件，每个子文件保留表头"""
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]✂️ Excel 文件分割工具[/bold cyan]\n"
+            "[dim]将一个 Excel 文件按指定行数分割为多个子文件[/dim]",
+            border_style="cyan",
+            padding=(1, 4),
+        ))
+        console.print()
 
-    col_a_letter, col_a_index = select_column_interactively(
-        ws_a_tmp,
-        prompt_title="请输入数据文件中用于匹配的列号（如 A、B、P、AA 等）",
-    )
-    wb_a_tmp.close()
-    console.print(f"[green]✅ 已选择数据文件匹配列：[bold white]{col_a_letter} 列[/bold white][/green]")
+        xlsx_files, script_dir = get_xlsx_files()
 
-    # ── 选择筛选文件的匹配列 ──
-    console.print()
-    console.rule("[bold cyan]第四步：选择筛选文件中提供匹配值的列[/bold cyan]")
-    with console.status("[cyan]正在读取筛选文件列信息...[/cyan]", spinner="dots"):
-        wb_b_tmp = openpyxl.load_workbook(file_b_path, read_only=True, data_only=True)
-        ws_b_tmp = wb_b_tmp.active
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
+                "请将需要分割的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red",
+            ))
+            return False
 
-    col_b_letter, col_b_index = select_column_interactively(
-        ws_b_tmp,
-        prompt_title="请输入筛选文件中提供匹配值的列号（如 A、B、P、AA 等）",
-    )
-    wb_b_tmp.close()
-    console.print(f"[green]✅ 已选择筛选文件匹配列：[bold white]{col_b_letter} 列[/bold white][/green]")
+        # 选择文件
+        display_file_list_tui(xlsx_files, script_dir)
+        file_idx = select_file_tui(xlsx_files)
+        if file_idx is None:
+            return False
+        selected_file = get_safe_filename(xlsx_files[file_idx])
+        filepath = os.path.join(script_dir, selected_file)
+        console.print(f"[green]✅ 已选择文件：[bold white]{selected_file}[/bold white][/green]")
 
-    # ── 生成输出文件名 ──
-    base_name = os.path.splitext(file_a_name)[0]
-    output_filename = f"{base_name}_筛选结果.xlsx"
-    output_path = os.path.join(script_dir, output_filename)
+        # 读取文件获取行数信息
+        with console.status("[bold cyan]正在读取文件...[/bold cyan]", spinner="dots"):
+            df = pd.read_excel(filepath, dtype=str, engine="openpyxl")
 
-    # ── 确认操作 ──
-    console.print()
-    console.print(Panel(
-        f"[bold]操作确认[/bold]\n\n"
-        f"  📄 数据文件：  [cyan]{file_a_name}[/cyan]（匹配列：{col_a_letter} 列）\n"
-        f"  🔑 筛选文件：  [cyan]{file_b_name}[/cyan]（取值列：{col_b_letter} 列）\n"
-        f"  🔀 输出顺序：  与筛选文件 {col_b_letter} 列顺序一致\n"
-        f"  💾 输出文件：  [cyan]{output_filename}[/cyan]\n"
-        f"  📁 输出目录：  [cyan]{script_dir}[/cyan]",
-        border_style="yellow",
-        title="[yellow]请确认[/yellow]",
-    ))
+        total_rows = len(df)
+        console.print(f"[green]✅ 文件共 [bold]{total_rows}[/bold] 行数据（不含表头）[/green]")
 
-    confirm = Prompt.ask(
-        "[bold yellow]确认开始处理？[/bold yellow]",
-        choices=["y", "n"],
-        default="y",
-    )
-    if confirm.lower() != "y":
-        console.print("[dim]已取消操作。[/dim]")
+        if total_rows == 0:
+            console.print("[yellow]文件没有数据行，无需分割。[/yellow]")
+            return False
+
+        # 让用户输入每份的行数
+        while True:
+            rows_input = Prompt.ask(
+                "\n[bold green]请输入每份的行数（不含表头），输入 q 返回[/bold green]",
+                default="5000",
+            ).strip()
+
+            if rows_input.lower() == "q":
+                console.print("[dim]已返回上级菜单。[/dim]")
+                return False
+
+            if not rows_input.isdigit() or int(rows_input) <= 0:
+                console.print("[bold red]❌ 请输入一个正整数！[/bold red]")
+                continue
+
+            rows_per_file = int(rows_input)
+            break
+
+        # 计算分割信息
+        import math
+        num_files = math.ceil(total_rows / rows_per_file)
+
+        # 确认操作
+        console.print()
+        console.print(Panel(
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 源文件：    [cyan]{selected_file}[/cyan]\n"
+            f"  📊 总行数：    [cyan]{total_rows}[/cyan] 行\n"
+            f"  ✂️  每份行数：  [cyan]{rows_per_file}[/cyan] 行\n"
+            f"  📁 预计生成：  [cyan]{num_files}[/cyan] 个文件\n"
+            f"  📁 输出目录：  [cyan]{script_dir}[/cyan]",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]",
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始分割？[/bold yellow]",
+            choices=["y", "n"],
+            default="y",
+        )
+        if confirm.lower() != "y":
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # 执行分割
+        console.print()
+        console.rule("[bold cyan]处理中[/bold cyan]")
+
+        base_name = os.path.splitext(selected_file)[0]
+        output_files = []
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]正在分割文件...", total=num_files)
+
+            for i in range(num_files):
+                start_row = i * rows_per_file
+                end_row = min(start_row + rows_per_file, total_rows)
+                chunk = df.iloc[start_row:end_row]
+
+                part_num = i + 1
+                output_filename = f"{base_name}_第{part_num}份.xlsx"
+                part_output_path = os.path.join(script_dir, output_filename)
+
+                df_to_save = chunk.apply(lambda col: col.map(sanitize_excel_cell_value))
+                with pd.ExcelWriter(part_output_path, engine="openpyxl") as writer:
+                    df_to_save.to_excel(writer, index=False, sheet_name="Sheet1")
+                    worksheet = writer.sheets["Sheet1"]
+                    for row in worksheet.iter_rows():
+                        for cell in row:
+                            cell.number_format = "@"
+
+                output_files.append((output_filename, len(chunk)))
+                progress.update(task, description=f"[cyan]已写入：{output_filename}（{len(chunk)} 行）")
+                progress.advance(task)
+
+        # 展示结果
+        console.print()
+        result_table = Table(title="✅ 分割完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("文件名", style="bold")
+        result_table.add_column("行数", style="cyan", justify="right")
+
+        for fname, row_count in output_files:
+            result_table.add_row(fname, str(row_count))
+
+        result_table.add_row("─" * 20, "─" * 6, style="dim")
+        result_table.add_row("[bold]总计[/bold]", f"[bold]{total_rows}[/bold]")
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
+            border_style="red",
+        ))
         return False
 
-    # ── 执行处理 ──
-    console.print()
-    console.rule("[bold cyan]处理中[/bold cyan]")
 
-    b_order, b_values = read_b_column(file_b_path, col_b_index)
-    console.print(
-        f"[green]✅ 筛选文件 {col_b_letter} 列共读取到 "
-        f"[bold]{len(b_order)}[/bold] 个值（[bold]{len(b_values)}[/bold] 个唯一值）[/green]"
-    )
+# ────────────────────────────────────────────────────────────────────────────────
+# 功能5：按主键横向合并两个 Excel 文件
+# ────────────────────────────────────────────────────────────────────────────────
 
-    original_rows, matched_rows = filter_and_write(
-        file_a_path, col_a_index, b_order, b_values, output_path
-    )
+def merge_two_xlsx_by_key():
+    """按主键列将 B 文件的列横向追加到 A 文件右侧"""
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]🔀 Excel 横向合并工具[/bold cyan]\n"
+            "[dim]按主键将两个 Excel 文件横向合并（B 追加到 A 右侧）[/dim]",
+            border_style="cyan",
+            padding=(1, 4),
+        ))
+        console.print()
 
-    # ── 展示结果 ──
-    console.print()
-    result_table = Table(title="✅ 处理完成", show_header=True, header_style="bold green", box=box.ROUNDED)
-    result_table.add_column("项目", style="bold")
-    result_table.add_column("数值", style="cyan", justify="right")
+        xlsx_files, script_dir = get_xlsx_files()
 
-    result_table.add_row("数据文件总行数（不含表头）", str(original_rows))
-    result_table.add_row("筛选文件唯一值数量", str(len(b_values)))
-    result_table.add_row("命中并保留的行数", f"[green]{matched_rows}[/green]")
-    result_table.add_row("未命中丢弃的行数", f"[red]{original_rows - matched_rows}[/red]")
-    result_table.add_row("输出顺序", f"与筛选文件 {col_b_letter} 列一致")
-    result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
+                "请将需要合并的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red",
+            ))
+            return False
 
-    console.print(result_table)
-    return True
+        # ── 选择 A 文件 ──
+        console.rule("[bold cyan]第一步：选择主文件（A 文件）[/bold cyan]")
+        display_file_list_tui(xlsx_files, script_dir)
+        file_a_idx = select_file_tui(xlsx_files, prompt_text="请输入主文件的编号（输入 q 返回）")
+        if file_a_idx is None:
+            return False
+        file_a_name = get_safe_filename(xlsx_files[file_a_idx])
+        file_a_path = os.path.join(script_dir, file_a_name)
+        console.print(f"[green]✅ 已选择主文件：[bold white]{file_a_name}[/bold white][/green]")
+
+        # ── 选择 B 文件 ──
+        console.print()
+        console.rule("[bold cyan]第二步：选择追加文件（B 文件）[/bold cyan]")
+        display_file_list_tui(xlsx_files, script_dir)
+        file_b_idx = select_file_tui(xlsx_files, prompt_text="请输入追加文件的编号（输入 q 返回）")
+        if file_b_idx is None:
+            return False
+        file_b_name = get_safe_filename(xlsx_files[file_b_idx])
+        file_b_path = os.path.join(script_dir, file_b_name)
+        console.print(f"[green]✅ 已选择追加文件：[bold white]{file_b_name}[/bold white][/green]")
+
+        # ── 读取两个文件 ──
+        with console.status("[bold cyan]正在读取文件...[/bold cyan]", spinner="dots"):
+            df_a = pd.read_excel(file_a_path, dtype=str, engine="openpyxl")
+            df_b = pd.read_excel(file_b_path, dtype=str, engine="openpyxl")
+
+        console.print(f"[green]✅ A 文件：{len(df_a)} 行 × {len(df_a.columns)} 列[/green]")
+        console.print(f"[green]✅ B 文件：{len(df_b)} 行 × {len(df_b.columns)} 列[/green]")
+
+        # ── 选择 A 文件的主键列 ──
+        console.print()
+        console.rule("[bold cyan]第三步：选择 A 文件中的主键列[/bold cyan]")
+        result_a = select_column_from_df(df_a, prompt_title="请输入 A 文件的主键列号（如 A、B），输入 q 返回")
+        if result_a is None:
+            return False
+        col_a_letter, col_a_index = result_a
+        col_a_name = df_a.columns[col_a_index]
+        console.print(f"[green]✅ A 文件主键列：[bold white]{col_a_letter} 列（{col_a_name}）[/bold white][/green]")
+
+        # ── 选择 B 文件的主键列 ──
+        console.print()
+        console.rule("[bold cyan]第四步：选择 B 文件中的主键列[/bold cyan]")
+        result_b = select_column_from_df(df_b, prompt_title="请输入 B 文件的主键列号（如 A、B），输入 q 返回")
+        if result_b is None:
+            return False
+        col_b_letter, col_b_index = result_b
+        col_b_name = df_b.columns[col_b_index]
+        console.print(f"[green]✅ B 文件主键列：[bold white]{col_b_letter} 列（{col_b_name}）[/bold white][/green]")
+
+        # ── 检查主键不匹配情况 ──
+        keys_a = set(df_a[col_a_name].dropna().astype(str).str.strip())
+        keys_b = set(df_b[col_b_name].dropna().astype(str).str.strip())
+        only_in_a = keys_a - keys_b
+        only_in_b = keys_b - keys_a
+
+        how = "left"  # 默认以 A 为准
+
+        if only_in_a or only_in_b:
+            console.print()
+            if only_in_a:
+                console.print(
+                    f"[yellow]⚠️  A 文件中有 [bold]{len(only_in_a)}[/bold] 个主键在 B 文件中不存在"
+                    f"（B 的列将填空）[/yellow]"
+                )
+            if only_in_b:
+                console.print(
+                    f"[yellow]⚠️  B 文件中有 [bold]{len(only_in_b)}[/bold] 个主键在 A 文件中不存在[/yellow]"
+                )
+
+            console.print()
+            console.print("[bold]请选择不匹配行的处理方式：[/bold]")
+            console.print("  [cyan]1.[/cyan] 仅保留 A 文件的行（B 中多余的丢弃，A 中无匹配的 B 列留空）")
+            console.print("  [cyan]2.[/cyan] 保留所有行（A 和 B 各自独有的行都保留，缺失列留空）")
+            console.print("  [cyan]3.[/cyan] 仅保留两者都有的行（取交集）")
+
+            merge_choice = Prompt.ask(
+                "\n[bold green]请选择[/bold green]",
+                choices=["1", "2", "3"],
+                default="1",
+            )
+            if merge_choice == "2":
+                how = "outer"
+            elif merge_choice == "3":
+                how = "inner"
+
+        # ── 确认操作 ──
+        how_desc = {"left": "以 A 文件为准", "outer": "保留所有行", "inner": "仅保留交集"}
+        console.print()
+        console.print(Panel(
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 主文件(A)：  [cyan]{file_a_name}[/cyan]（主键列：{col_a_letter} - {col_a_name}）\n"
+            f"  📄 追加文件(B)：[cyan]{file_b_name}[/cyan]（主键列：{col_b_letter} - {col_b_name}）\n"
+            f"  🔀 合并方式：   [cyan]{how_desc[how]}[/cyan]\n"
+            f"  📁 输出目录：   [cyan]{script_dir}[/cyan]",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]",
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始合并？[/bold yellow]",
+            choices=["y", "n"],
+            default="y",
+        )
+        if confirm.lower() != "y":
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # ── 执行合并 ──
+        console.print()
+        console.rule("[bold cyan]处理中[/bold cyan]")
+
+        with console.status("[bold cyan]正在合并数据...[/bold cyan]", spinner="dots"):
+            # 统一主键列的值为 strip 后的字符串
+            df_a["_merge_key_"] = df_a[col_a_name].fillna("").astype(str).str.strip()
+            df_b["_merge_key_"] = df_b[col_b_name].fillna("").astype(str).str.strip()
+
+            # B 文件去掉主键列（避免重复），保留其余列
+            b_cols_to_add = [c for c in df_b.columns if c != col_b_name and c != "_merge_key_"]
+
+            # 如果 B 的列名与 A 重复，加后缀
+            rename_map = {}
+            for c in b_cols_to_add:
+                if c in df_a.columns:
+                    rename_map[c] = f"{c}_B"
+            df_b_renamed = df_b[["_merge_key_"] + b_cols_to_add].rename(columns=rename_map)
+
+            merged = df_a.merge(df_b_renamed, on="_merge_key_", how=how)
+            merged.drop(columns=["_merge_key_"], inplace=True)
+
+        # 保存
+        base_name_a = os.path.splitext(file_a_name)[0]
+        output_filename = f"{base_name_a}_横向合并.xlsx"
+        output_path = os.path.join(script_dir, output_filename)
+
+        with console.status("[bold cyan]正在保存文件...[/bold cyan]", spinner="dots"):
+            df_to_save = merged.apply(lambda col: col.map(sanitize_excel_cell_value))
+            with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+                df_to_save.to_excel(writer, index=False, sheet_name="Sheet1")
+                worksheet = writer.sheets["Sheet1"]
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        cell.number_format = "@"
+
+        # 展示结果
+        console.print()
+        result_table = Table(title="✅ 横向合并完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("项目", style="bold")
+        result_table.add_column("数值", style="cyan", justify="right")
+        result_table.add_row("A 文件行数", str(len(df_a)))
+        result_table.add_row("B 文件行数", str(len(df_b)))
+        result_table.add_row("合并后行数", str(len(merged)))
+        result_table.add_row("合并后列数", str(len(merged.columns)))
+        result_table.add_row("合并方式", how_desc[how])
+        result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
+            border_style="red",
+        ))
+        return False
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# 功能6：按分组 ID 排序并标红最新时间行
+# ────────────────────────────────────────────────────────────────────────────────
+
+_COMMON_TIME_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y/%m/%d %H:%M",
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%Y%m%d%H%M%S",
+    "%Y%m%d",
+]
+
+
+def _detect_time_format(series):
+    """自动检测时间列的格式，返回最佳匹配的 format 字符串；失败返回 None"""
+    samples = series.dropna().head(100)
+    if samples.empty:
+        return None
+
+    best_fmt = None
+    best_count = 0
+
+    for fmt in _COMMON_TIME_FORMATS:
+        ok = 0
+        for val in samples:
+            try:
+                datetime.datetime.strptime(str(val).strip(), fmt)
+                ok += 1
+            except (ValueError, TypeError):
+                pass
+        if ok > best_count:
+            best_count = ok
+            best_fmt = fmt
+
+    # 至少 60% 匹配才算成功
+    if best_fmt and best_count >= len(samples) * 0.6:
+        return best_fmt
+    return None
+
+
+def highlight_latest_rows():
+    """按分组 ID 列排序，标红每组中时间最新的行"""
+    try:
+        console.print(Panel.fit(
+            "[bold cyan]🔴 Excel 分组标红工具[/bold cyan]\n"
+            "[dim]按分组 ID 列排序，标红每组中时间最新的行[/dim]",
+            border_style="cyan",
+            padding=(1, 4),
+        ))
+        console.print()
+
+        xlsx_files, script_dir = get_xlsx_files()
+
+        if not xlsx_files:
+            console.print(Panel(
+                "[bold red]❌ 当前文件夹中没有找到任何 .xlsx 文件！\n"
+                "请将需要处理的 Excel 文件放在本程序所在文件夹中。[/bold red]",
+                border_style="red",
+            ))
+            return False
+
+        # 选择文件
+        display_file_list_tui(xlsx_files, script_dir)
+        file_idx = select_file_tui(xlsx_files)
+        if file_idx is None:
+            return False
+        selected_file = get_safe_filename(xlsx_files[file_idx])
+        filepath = os.path.join(script_dir, selected_file)
+        console.print(f"[green]✅ 已选择文件：[bold white]{selected_file}[/bold white][/green]")
+
+        # 读取
+        with console.status("[bold cyan]正在读取文件...[/bold cyan]", spinner="dots"):
+            df = pd.read_excel(filepath, dtype=str, engine="openpyxl")
+
+        console.print(f"[green]✅ 文件共 [bold]{len(df)}[/bold] 行 × [bold]{len(df.columns)}[/bold] 列[/green]")
+
+        # 选择分组 ID 列
+        console.print()
+        console.rule("[bold cyan]选择分组 ID 列（类似 sessionId）[/bold cyan]")
+        result_id = select_column_from_df(df, prompt_title="请输入分组 ID 列号（如 A、B），输入 q 返回")
+        if result_id is None:
+            return False
+        id_col_letter, id_col_index = result_id
+        id_col_name = df.columns[id_col_index]
+        console.print(f"[green]✅ 分组 ID 列：[bold white]{id_col_letter} 列（{id_col_name}）[/bold white][/green]")
+
+        # 选择时间列
+        console.print()
+        console.rule("[bold cyan]选择时间列[/bold cyan]")
+        result_time = select_column_from_df(df, prompt_title="请输入时间列号（如 A、B），输入 q 返回")
+        if result_time is None:
+            return False
+        time_col_letter, time_col_index = result_time
+        time_col_name = df.columns[time_col_index]
+        console.print(f"[green]✅ 时间列：[bold white]{time_col_letter} 列（{time_col_name}）[/bold white][/green]")
+
+        # 自动检测时间格式
+        console.print()
+        with console.status("[bold cyan]正在检测时间格式...[/bold cyan]", spinner="dots"):
+            time_fmt = _detect_time_format(df[time_col_name])
+
+        if time_fmt is None:
+            console.print("[yellow]⚠️  无法自动识别时间格式，将尝试 pandas 自动解析。[/yellow]")
+            df["_time_dt_"] = pd.to_datetime(df[time_col_name], errors="coerce")
+        else:
+            console.print(f"[green]✅ 检测到时间格式：[bold white]{time_fmt}[/bold white][/green]")
+            df["_time_dt_"] = pd.to_datetime(df[time_col_name], format=time_fmt, errors="coerce")
+
+        valid_time_count = df["_time_dt_"].notna().sum()
+        console.print(f"[green]✅ 成功解析 [bold]{valid_time_count}[/bold] / {len(df)} 个时间值[/green]")
+
+        if valid_time_count == 0:
+            console.print("[red]❌ 没有任何有效的时间值，无法继续。[/red]")
+            return False
+
+        # 确认操作
+        group_count = df[id_col_name].nunique()
+        console.print()
+        console.print(Panel(
+            f"[bold]操作确认[/bold]\n\n"
+            f"  📄 处理文件：  [cyan]{selected_file}[/cyan]\n"
+            f"  🔑 分组 ID 列：[cyan]{id_col_letter} 列（{id_col_name}）[/cyan]\n"
+            f"  🕐 时间列：    [cyan]{time_col_letter} 列（{time_col_name}）[/cyan]\n"
+            f"  📊 分组数量：  [cyan]{group_count}[/cyan] 个\n"
+            f"  🔴 标记方式：  每组中时间最新的行标红背景",
+            border_style="yellow",
+            title="[yellow]请确认[/yellow]",
+        ))
+
+        confirm = Prompt.ask(
+            "[bold yellow]确认开始处理？[/bold yellow]",
+            choices=["y", "n"],
+            default="y",
+        )
+        if confirm.lower() != "y":
+            console.print("[dim]已取消操作。[/dim]")
+            return False
+
+        # ── 执行处理 ──
+        console.print()
+        console.rule("[bold cyan]处理中[/bold cyan]")
+
+        # 找出每个分组中时间最新的行索引
+        rows_to_red = set()
+        with console.status("[bold cyan]正在分析分组数据...[/bold cyan]", spinner="dots"):
+            for _sid, grp in df.groupby(id_col_name, sort=False):
+                valid = grp[grp["_time_dt_"].notna()]
+                if valid.empty:
+                    continue
+                max_t = valid["_time_dt_"].max()
+                for idx in valid[valid["_time_dt_"] == max_t].index:
+                    rows_to_red.add(idx)
+
+        console.print(f"[green]✅ 共 [bold]{group_count}[/bold] 个分组，需标红 [bold]{len(rows_to_red)}[/bold] 行[/green]")
+
+        # 按分组 ID + 时间排序
+        with console.status("[bold cyan]正在排序...[/bold cyan]", spinner="dots"):
+            df["_sort_key_"] = df.index  # 保留原始顺序用于稳定排序
+            df.sort_values(by=[id_col_name, "_time_dt_", "_sort_key_"], inplace=True)
+            # 更新标红索引到排序后的位置
+            sorted_indices = df.index.tolist()
+            sorted_red_positions = set()
+            for pos, orig_idx in enumerate(sorted_indices):
+                if orig_idx in rows_to_red:
+                    sorted_red_positions.add(pos)
+
+        # 用 openpyxl 写入新文件
+        from openpyxl.styles import PatternFill
+
+        base_name = os.path.splitext(selected_file)[0]
+        output_filename = f"{base_name}_标红最新.xlsx"
+        output_path = os.path.join(script_dir, output_filename)
+
+        headers = [c for c in df.columns if c not in ("_time_dt_", "_sort_key_")]
+        red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]正在写入文件...", total=len(df) + 1)
+
+            # 写入表头
+            for ci, h in enumerate(headers, start=1):
+                cell = ws_out.cell(row=1, column=ci, value=h)
+                cell.number_format = "@"
+            progress.advance(task)
+
+            # 写入数据行
+            for pos, (orig_idx, row_data) in enumerate(df.iterrows()):
+                excel_row = pos + 2  # 表头占第 1 行
+                is_red = pos in sorted_red_positions
+                for ci, col_name in enumerate(headers, start=1):
+                    val = row_data[col_name]
+                    # 处理 NaN
+                    if pd.isna(val):
+                        cell = ws_out.cell(row=excel_row, column=ci, value=None)
+                    else:
+                        cleaned = sanitize_excel_cell_value(val)
+                        cell = ws_out.cell(row=excel_row, column=ci, value=cleaned)
+                    cell.number_format = "@"
+                    if is_red:
+                        cell.fill = red_fill
+                progress.advance(task)
+
+        with console.status("[bold cyan]正在保存文件...[/bold cyan]", spinner="dots"):
+            wb_out.save(output_path)
+            wb_out.close()
+
+        # 展示结果
+        console.print()
+        result_table = Table(title="✅ 处理完成", show_header=True, header_style="bold green", box=box.ROUNDED)
+        result_table.add_column("项目", style="bold")
+        result_table.add_column("数值", style="cyan", justify="right")
+        result_table.add_row("总行数", str(len(df)))
+        result_table.add_row("分组数量", str(group_count))
+        result_table.add_row("标红行数", f"[red]{len(rows_to_red)}[/red]")
+        result_table.add_row("排序方式", f"按 {id_col_name} 分组 + {time_col_name} 排序")
+        result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
+        console.print(result_table)
+        return True
+
+    except Exception as e:
+        import traceback
+        console.print(Panel(
+            f"[red]✗ 处理失败![/red]\n\n错误信息: {e}\n{traceback.format_exc()}",
+            title="[bold red]错误[/bold red]",
+            border_style="red",
+        ))
+        return False
 
 
 def show_banner():
@@ -1338,9 +2104,9 @@ def show_banner():
     ║                                                       ║
     ║     📊 Excel 通用数据处理工具                         ║
     ║                                                       ║
-    ║     支持 JSON / 键值对 / 纯文本 格式                  ║
-    ║     多列处理 - 交互式多步骤操作                       ║
-    ║     去重 / 筛选交集 功能                              ║
+    ║     数据提取 / 去重 / 筛选交集                        ║
+    ║     批量合并 / 文件分割 / 横向合并                    ║
+    ║     分组排序标红                                      ║
     ║                                                       ║
     ╚═══════════════════════════════════════════════════════╝
     """
@@ -1363,9 +2129,8 @@ def show_file_list(files):
 
     # 获取终端宽度
     try:
-        import shutil
         terminal_width = shutil.get_terminal_size().columns
-    except:
+    except (ValueError, OSError):
         terminal_width = 80
     
     # 计算文件名列的宽度
@@ -1383,7 +2148,6 @@ def show_file_list(files):
         size = file.stat().st_size
         size_str = f"{size / 1024:.2f} KB" if size < 1024 * 1024 else f"{size / (1024 * 1024):.2f} MB"
 
-        import datetime
         mtime = datetime.datetime.fromtimestamp(file.stat().st_mtime)
         mtime_str = mtime.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1396,56 +2160,18 @@ def show_file_list(files):
 
     console.print(table)
 
-def main():
-    """主函数"""
-    console.clear()
-    show_banner()
-
-    # 显示当前工作目录
-    console.print(f"[dim]📁 当前工作目录: {Path.cwd()}[/dim]\n")
-
-    # ── 功能选择菜单 ──
-    console.print()
-    menu_table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
-    menu_table.add_column("选项", style="cyan", width=6)
-    menu_table.add_column("说明", style="white")
-    menu_table.add_row("1.", "Excel 通用数据提取（JSON/键值对/纯文本）")
-    menu_table.add_row("2.", "去除xlsx指定列的重复项")
-    menu_table.add_row("3.", "筛选交集（按另一文件顺序筛选）")
-    menu_table.add_row("4.", "退出程序")
-    console.print(menu_table)
-
-    func_choice = Prompt.ask("\n[bold green]请输入选项 [1/2/3/4][/bold green]", choices=["1", "2", "3", "4"], default="1")
-
-    if func_choice == "4":
-        console.print("\n[yellow]👋 感谢使用,再见![/yellow]")
-        return
-
-    if func_choice == "2":
-        # 去重功能
-        console.clear()
-        deduplicate_by_column()
-        # 完成后询问是否返回主菜单
-        if Confirm.ask("\n是否返回主菜单?", default=True):
-            console.clear()
-            main()
-            return
-        return
-
-    if func_choice == "3":
-        # 筛选交集
-        console.clear()
-        filter_intersection()
-        # 完成后询问是否返回主菜单
-        if Confirm.ask("\n是否返回主菜单?", default=True):
-            console.clear()
-            main()
-            return
-        return
-
-    # 默认进入原有的通用数据提取功能
+def _run_data_extraction():
+    """运行通用数据提取功能（功能1的子循环）"""
     console.print("\n[bold cyan]✨ 已进入 Excel 通用数据提取功能[/bold cyan]")
     while True:
+        console.clear()
+        show_banner()
+        console.print(f"[dim]当前工作目录: {Path.cwd()}[/dim]")
+
+        # 先显示文件列表
+        excel_files = list_excel_files()
+        show_file_list(excel_files)
+
         console.print("\n[bold cyan]╔═══════════════════════════════════════╗[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan] [bold]文件选择菜单[/bold]                          [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]╠═══════════════════════════════════════╣[/bold cyan]")
@@ -1455,10 +2181,6 @@ def main():
         console.print("[bold cyan]║[/bold cyan] [cyan]4.[/cyan] 返回主菜单                        [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]╚═══════════════════════════════════════╝[/bold cyan]")
 
-        # 显示文件列表
-        excel_files = list_excel_files()
-        show_file_list(excel_files)
-
         choice = Prompt.ask("\n[bold green]请输入选项 [1/2/3/4][/bold green]", choices=["1", "2", "3", "4"], default="1")
 
         if choice == "4":
@@ -1466,9 +2188,6 @@ def main():
             return
 
         if choice == "3":
-            console.clear()
-            show_banner()
-            console.print(f"[dim]当前工作目录: {Path.cwd()}[/dim]")
             continue
 
         file_path = None
@@ -1504,7 +2223,7 @@ def main():
 
         console.print(f"\n[bold cyan]开始处理文件...[/bold cyan]")
         success, result, row_count = process_excel_interactive(file_path)
-        
+
         if success:
             panel = Panel(
                 f"[green]✓ 处理成功![/green]\n\n"
@@ -1523,6 +2242,75 @@ def main():
                     border_style="red"
                 )
                 console.print(panel)
+
+
+def main():
+    """主函数"""
+    console.clear()
+    show_banner()
+
+    # 显示当前工作目录
+    console.print(f"[dim]📁 当前工作目录: {Path.cwd()}[/dim]\n")
+
+    all_choices = ["1", "2", "3", "4", "5", "6", "7", "8"]
+
+    while True:
+        # ── 功能选择菜单 ──
+        console.print()
+        menu_table = Table(box=box.ROUNDED, show_header=False, padding=(0, 2))
+        menu_table.add_column("选项", style="cyan", width=6)
+        menu_table.add_column("说明", style="white")
+        menu_table.add_row("1.", "Excel 通用数据提取（JSON/键值对/纯文本）")
+        menu_table.add_row("2.", "去除指定列的重复项")
+        menu_table.add_row("3.", "筛选交集（按另一文件顺序筛选）")
+        menu_table.add_row("4.", "合并当前文件夹下所有 Excel 文件")
+        menu_table.add_row("5.", "按指定行数分割 Excel 文件")
+        menu_table.add_row("6.", "按主键横向合并两个 Excel 文件")
+        menu_table.add_row("7.", "分组排序并标红最新时间行")
+        menu_table.add_row("8.", "退出程序")
+        console.print(menu_table)
+
+        func_choice = Prompt.ask(
+            "\n[bold green]请输入选项 [1-8][/bold green]",
+            choices=all_choices,
+            default="1",
+        )
+
+        if func_choice == "8":
+            console.print("\n[yellow]👋 感谢使用,再见![/yellow]")
+            return
+
+        if func_choice == "1":
+            _run_data_extraction()
+
+        elif func_choice == "2":
+            console.clear()
+            deduplicate_by_column()
+
+        elif func_choice == "3":
+            console.clear()
+            filter_intersection()
+
+        elif func_choice == "4":
+            console.clear()
+            merge_all_xlsx()
+
+        elif func_choice == "5":
+            console.clear()
+            split_xlsx_by_rows()
+
+        elif func_choice == "6":
+            console.clear()
+            merge_two_xlsx_by_key()
+
+        elif func_choice == "7":
+            console.clear()
+            highlight_latest_rows()
+
+        # 每次功能执行完毕后自动回到主菜单循环顶部
+        console.clear()
+        show_banner()
+        console.print(f"[dim]📁 当前工作目录: {Path.cwd()}[/dim]\n")
 
 if __name__ == "__main__":
     try:

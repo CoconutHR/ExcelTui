@@ -1,3 +1,7 @@
+> **⚠️ 注意：本文档中嵌入的代码为 v1.0 早期版本的快照，仅供打包流程参考。实际代码请以 `exceltui/main.py` 为准。**
+>
+> **当前版本：v3.0.0** — 新增合并工作表、拆分工作表、按关键列横向合并、分组排序并高亮最新时间行等功能。
+
 ## 使用 setuptools 打包
 
 ### 1. 创建项目结构
@@ -844,7 +848,7 @@ if __name__ == "__main__":
 ```python
 from .main import main
 
-__version__ = "1.0.0"
+__version__ = "3.0.0"
 ```
 
 ### 4. 创建 `setup.py`
@@ -857,10 +861,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="exceltui",
-    version="1.0.0",
+    version="3.0.0",
     author="coco",
     author_email="excel.tui@coco",
-    description="Excel通用数据提取工具 - 支持JSON/键值对/纯文本格式",
+    description="Excel 通用数据处理工具 - 数据提取 / 合并 / 拆分 / 横向关联 / 分组高亮",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/CoconutHR/ExcelTui",
@@ -875,6 +879,7 @@ setup(
         "pandas>=1.3.0",
         "openpyxl>=3.0.0",
         "rich>=10.0.0",
+        "python-dateutil>=2.8.0",
     ],
     entry_points={
         "console_scripts": [
@@ -911,6 +916,10 @@ exceltui
 - 多列交互式处理
 - 转义字符处理
 - 自定义输出格式
+- 合并多个 xlsx 工作表
+- 按行数拆分 xlsx
+- 按关键列横向合并两个 xlsx
+- 分组排序并高亮最新时间行
 ```
 
 ### 6. 安装

@@ -1270,8 +1270,7 @@ def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
         transient=True,
     ) as progress:
         task = progress.add_task("read_a", total=max_row)
-        for row in ws_a.iter_rows():
-            row_num = row[0].row
+        for row_num, row in enumerate(ws_a.iter_rows(), start=1):
 
             # 表头单独保存
             if row_num == 1:

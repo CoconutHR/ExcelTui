@@ -1247,13 +1247,16 @@ def read_b_column(filepath, col_index_0based):
     return b_order, b_values
 
 
-def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
+def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path, mode="keep_intersection"):
     """
-    读取数据文件，将匹配行按照筛选文件的值顺序写入输出文件。
-    返回: (original_rows, matched_rows)
+    读取数据文件，根据模式筛选行并写入输出文件。
+    mode:
+        - "keep_intersection": 保留交集（匹配行），输出顺序与筛选文件一致
+        - "remove_intersection": 删除交集（保留非匹配行），输出顺序与原文件一致
+    返回: (original_rows, result_rows)
     """
 
-    # ── Step 1：将数据文件所有行读入内存，构建 key → [行数据, ...] 的映射 ──
+    # ── Step 1：将数据文件所有行读入内存 ──
     wb_a = openpyxl.load_workbook(file_a_path, read_only=True, data_only=True)
     ws_a = wb_a.active
     max_row = ws_a.max_row
@@ -1261,6 +1264,7 @@ def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
 
     header_row = None
     key_to_rows: dict[str, list] = {}
+    non_match_rows: list = []  # 用于 remove_intersection 模式
 
     with Progress(
         SpinnerColumn(),
@@ -1283,20 +1287,36 @@ def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
 
             key_cell = row[col_a_index]
             if key_cell.value is None:
+                # 空值行：在 remove 模式下保留，在 keep 模式下跳过
+                if mode == "remove_intersection":
+                    row_data = [
+                        (str(cell.value).strip() if cell.value is not None else None)
+                        for cell in row
+                    ]
+                    non_match_rows.append(row_data)
                 progress.advance(task)
                 continue
 
             key = str(key_cell.value).strip()
 
-            # 只缓存在 b_values 中存在的行，节省内存
             if key in b_values:
-                row_data = [
-                    (str(cell.value).strip() if cell.value is not None else None)
-                    for cell in row
-                ]
-                if key not in key_to_rows:
-                    key_to_rows[key] = []
-                key_to_rows[key].append(row_data)
+                # 匹配行
+                if mode == "keep_intersection":
+                    row_data = [
+                        (str(cell.value).strip() if cell.value is not None else None)
+                        for cell in row
+                    ]
+                    if key not in key_to_rows:
+                        key_to_rows[key] = []
+                    key_to_rows[key].append(row_data)
+            else:
+                # 非匹配行
+                if mode == "remove_intersection":
+                    row_data = [
+                        (str(cell.value).strip() if cell.value is not None else None)
+                        for cell in row
+                    ]
+                    non_match_rows.append(row_data)
 
             progress.advance(task)
 
@@ -1304,24 +1324,28 @@ def filter_and_write(file_a_path, col_a_index, b_order, b_values, output_path):
 
     original_rows = max_row - 1  # 不含表头
 
-    # ── Step 2：按 b_order 的顺序拼接最终输出行列表 ──
-    seen_keys = set()
-    ordered_rows = []
+    # ── Step 2：根据模式组装输出行 ──
+    if mode == "keep_intersection":
+        seen_keys = set()
+        ordered_rows = []
+        for val in b_order:
+            if val in seen_keys:
+                continue
+            seen_keys.add(val)
+            if val in key_to_rows:
+                ordered_rows.extend(key_to_rows[val])   # 同 key 多行，组内保持原顺序
+        result_rows = ordered_rows
+    else:
+        # remove_intersection: 保留不在交集中的行，维持原文件顺序
+        result_rows = non_match_rows
 
-    for val in b_order:
-        if val in seen_keys:
-            continue
-        seen_keys.add(val)
-        if val in key_to_rows:
-            ordered_rows.extend(key_to_rows[val])   # 同 key 多行，组内保持原顺序
-
-    matched_rows = len(ordered_rows)
+    matched_rows = len(result_rows)
 
     # ── Step 3：写入输出文件 ──
     wb_out = openpyxl.Workbook()
     ws_out = wb_out.active
 
-    all_rows = [header_row] + ordered_rows  # 表头 + 数据
+    all_rows = [header_row] + result_rows  # 表头 + 数据
 
     with Progress(
         SpinnerColumn(),
@@ -1421,18 +1445,47 @@ def filter_intersection():
         col_b_letter, col_b_index = result_b
         console.print(f"[green]✅ 已选择筛选文件匹配列：[bold white]{col_b_letter} 列[/bold white][/green]")
 
+        # ── 选择筛选模式 ──
+        console.print()
+        console.rule("[bold cyan]第五步：选择筛选模式[/bold cyan]")
+        console.print()
+        mode_table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED)
+        mode_table.add_column("选项", style="bold", justify="center")
+        mode_table.add_column("模式", style="cyan")
+        mode_table.add_column("说明", style="dim")
+        mode_table.add_row("1", "保留交集", "保留匹配的行，删除不匹配的行")
+        mode_table.add_row("2", "删除交集", "删除匹配的行，保留不匹配的行")
+        console.print(mode_table)
+        console.print()
+
+        filter_mode = Prompt.ask(
+            "请选择筛选模式",
+            choices=["1", "2"],
+            default="1",
+        )
+        if filter_mode == "1":
+            mode = "keep_intersection"
+            mode_label = "保留交集（保留匹配行）"
+        else:
+            mode = "remove_intersection"
+            mode_label = "删除交集（保留非匹配行）"
+        console.print(f"[green]✅ 已选择模式：[bold white]{mode_label}[/bold white][/green]")
+
         # ── 生成输出文件名 ──
         base_name = os.path.splitext(file_a_name)[0]
-        output_filename = f"{base_name}_筛选结果.xlsx"
+        suffix = "_筛选结果.xlsx" if mode == "keep_intersection" else "_排除结果.xlsx"
+        output_filename = f"{base_name}{suffix}"
         output_path = os.path.join(script_dir, output_filename)
 
         # ── 确认操作 ──
+        order_desc = f"与筛选文件 {col_b_letter} 列顺序一致" if mode == "keep_intersection" else "与原数据文件顺序一致"
         console.print()
         console.print(Panel(
             f"[bold]操作确认[/bold]\n\n"
             f"  📄 数据文件：  [cyan]{file_a_name}[/cyan]（匹配列：{col_a_letter} 列）\n"
             f"  🔑 筛选文件：  [cyan]{file_b_name}[/cyan]（取值列：{col_b_letter} 列）\n"
-            f"  🔀 输出顺序：  与筛选文件 {col_b_letter} 列顺序一致\n"
+            f"  🎯 筛选模式：  [bold yellow]{mode_label}[/bold yellow]\n"
+            f"  🔀 输出顺序：  {order_desc}\n"
             f"  💾 输出文件：  [cyan]{output_filename}[/cyan]\n"
             f"  📁 输出目录：  [cyan]{script_dir}[/cyan]",
             border_style="yellow",
@@ -1459,7 +1512,7 @@ def filter_intersection():
         )
 
         original_rows, matched_rows = filter_and_write(
-            file_a_path, col_a_index, b_order, b_values, output_path
+            file_a_path, col_a_index, b_order, b_values, output_path, mode=mode
         )
 
         # ── 展示结果 ──
@@ -1470,9 +1523,10 @@ def filter_intersection():
 
         result_table.add_row("数据文件总行数（不含表头）", str(original_rows))
         result_table.add_row("筛选文件唯一值数量", str(len(b_values)))
-        result_table.add_row("命中并保留的行数", f"[green]{matched_rows}[/green]")
-        result_table.add_row("未命中丢弃的行数", f"[red]{original_rows - matched_rows}[/red]")
-        result_table.add_row("输出顺序", f"与筛选文件 {col_b_letter} 列一致")
+        result_table.add_row("筛选模式", f"[yellow]{mode_label}[/yellow]")
+        result_table.add_row("输出行数", f"[green]{matched_rows}[/green]")
+        result_table.add_row("排除行数", f"[red]{original_rows - matched_rows}[/red]")
+        result_table.add_row("输出顺序", order_desc)
         result_table.add_row("输出文件名", f"[green]{output_filename}[/green]")
 
         console.print(result_table)

@@ -2058,10 +2058,25 @@ _COMMON_TIME_FORMATS = [
 
 def _detect_time_format(time_values):
     """自动检测时间列的格式，返回最佳匹配的 format 字符串；失败返回 None。
-    time_values: list[str|None]"""
+    time_values: list[str|None]
+    特殊返回值：'__timestamp_s__' 表示秒级时间戳，'__timestamp_ms__' 表示毫秒级时间戳。"""
     samples = [str(v).strip() for v in time_values if v is not None][:100]
     if not samples:
         return None
+
+    # 先检测是否为 Unix 时间戳（纯数字，10位=秒级，13位=毫秒级）
+    ts_s_count = 0
+    ts_ms_count = 0
+    for val in samples:
+        if val.isdigit():
+            if len(val) == 10:
+                ts_s_count += 1
+            elif len(val) == 13:
+                ts_ms_count += 1
+    if ts_s_count >= len(samples) * 0.6:
+        return "__timestamp_s__"
+    if ts_ms_count >= len(samples) * 0.6:
+        return "__timestamp_ms__"
 
     best_fmt = None
     best_count = 0
@@ -2085,18 +2100,42 @@ def _detect_time_format(time_values):
 
 
 def _parse_datetime_safe(val, fmt=None):
-    """安全解析时间字符串，返回 datetime 或 None"""
+    """安全解析时间字符串，返回 datetime 或 None。
+    支持 fmt 为 '__timestamp_s__'（秒级时间戳）或 '__timestamp_ms__'（毫秒级时间戳）。"""
     if val is None:
         return None
     s = str(val).strip()
     if not s:
         return None
+    # 时间戳模式
+    if fmt == "__timestamp_s__":
+        try:
+            return datetime.datetime.fromtimestamp(int(s))
+        except (ValueError, TypeError, OSError):
+            return None
+    if fmt == "__timestamp_ms__":
+        try:
+            return datetime.datetime.fromtimestamp(int(s) / 1000)
+        except (ValueError, TypeError, OSError):
+            return None
     if fmt:
         try:
             return datetime.datetime.strptime(s, fmt)
         except (ValueError, TypeError):
             return None
-    # 无指定格式时逐一尝试
+    # 无指定格式时，先尝试时间戳（纯数字 10位或13位）
+    if s.isdigit():
+        if len(s) == 10:
+            try:
+                return datetime.datetime.fromtimestamp(int(s))
+            except (ValueError, TypeError, OSError):
+                pass
+        elif len(s) == 13:
+            try:
+                return datetime.datetime.fromtimestamp(int(s) / 1000)
+            except (ValueError, TypeError, OSError):
+                pass
+    # 逐一尝试字符串格式
     for f in _COMMON_TIME_FORMATS:
         try:
             return datetime.datetime.strptime(s, f)
@@ -2177,7 +2216,9 @@ def highlight_latest_rows():
             time_parsed.append(_parse_datetime_safe(val, time_fmt))
 
         if time_fmt is not None:
-            console.print(f"[green]✅ 检测到时间格式：[bold white]{time_fmt}[/bold white][/green]")
+            fmt_display = {"__timestamp_s__": "Unix 时间戳（秒级，10位）",
+                           "__timestamp_ms__": "Unix 时间戳（毫秒级，13位）"}.get(time_fmt, time_fmt)
+            console.print(f"[green]✅ 检测到时间格式：[bold white]{fmt_display}[/bold white][/green]")
 
         valid_time_count = sum(1 for t in time_parsed if t is not None)
         console.print(f"[green]✅ 成功解析 [bold]{valid_time_count}[/bold] / {len(tbl)} 个时间值[/green]")
@@ -2227,6 +2268,10 @@ def highlight_latest_rows():
             for orig_i, row, t, gk in indexed_rows:
                 groups.setdefault(gk, []).append((orig_i, t))
             for gk, members in groups.items():
+                # 分组只有一行时，无论时间是否有效都直接标红
+                if len(members) == 1:
+                    rows_to_red.add(members[0][0])
+                    continue
                 valid = [(idx, t) for idx, t in members if t is not None]
                 if not valid:
                     continue
